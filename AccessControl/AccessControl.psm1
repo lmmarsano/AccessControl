@@ -34,72 +34,66 @@ New-Variable -Name NtAdministrators `
    Another example of how to use this cmdlet
 #>
 function Invoke-AsOwner {
-	[CmdletBinding()]
-	[Alias()]
-	[OutputType([System.Security.AccessControl.CommonObjectSecurity])]
-	Param(
-		# Key Registry key to provide ACL.
-		[Parameter( ParameterSetName='RegistryKey'
-		          , Mandatory=$true
-		          , ValueFromPipeline=$true
-		          )]
-		[Microsoft.Win32.RegistryKey]
-		$Key,
+    [CmdletBinding()]
+    [Alias()]
+    [OutputType([System.Security.AccessControl.CommonObjectSecurity])]
+    Param(
+        # Key Registry key to provide ACL.
+        [Parameter( ParameterSetName='RegistryKey'
+                  , Mandatory=$true
+                  , ValueFromPipeline=$true
+                  )]
+        [Microsoft.Win32.RegistryKey]
+        $Key,
 
-		# Key Path of registry key to provide ACL.
-		[Parameter( ParameterSetName='RegistryPath'
-		          , Mandatory=$true
-		          , ValueFromPipeline=$true
-		          )]
-		[ValidateScript({Test-Path -LiteralPath $_})]
-		[string]
-		$KeyPath,
+        # Key Path of registry key to provide ACL.
+        [Parameter( ParameterSetName='RegistryPath'
+                  , Mandatory=$true
+                  , ValueFromPipeline=$true
+                  )]
+        [ValidateScript({Test-Path -LiteralPath $_})]
+        [string]
+        $KeyPath,
 
-		# ScriptBlock <[Microsoft.Win32.RegistryKey],[System.Security.AccessControl.CommonObjectSecurity]> scriptblock called to alter temporarily owned key and ACL.
-		[Parameter(Mandatory=$true)]
-		[System.Management.Automation.ScriptBlock]
-		$ScriptBlock,
+        # ScriptBlock <[Microsoft.Win32.RegistryKey],[System.Security.AccessControl.CommonObjectSecurity]> scriptblock called to alter temporarily owned key and ACL.
+        [Parameter(Mandatory=$true)]
+        [System.Management.Automation.ScriptBlock]
+        $ScriptBlock,
 
-		# Owner Temporary key owner during invocation. Default: current user.
-		[Parameter()]
-		[System.Security.Principal.IdentityReference]
-		$Owner=[System.Security.Principal.WindowsIdentity]::GetCurrent().User
-	)
+        # Owner Temporary key owner during invocation. Default: current user.
+        [Parameter()]
+        [System.Security.Principal.IdentityReference]
+        $Owner=[System.Security.Principal.WindowsIdentity]::GetCurrent().User,
 
-	Begin {
-		$priv = Get-Privilege
-		$priv0 = Get-Privilege
-		$priv.Enable([Pscx.Interop.TokenPrivilege]::Restore)
-		Set-Privilege -Privileges $priv
-	} Process {
-		Write-Debug -Message ('Bound Parameters:{0}' -f (Out-String -InputObject $PSBoundParameters))
-		Write-Debug -Message ('Parameter Set: {0}' -f $PsCmdlet.ParameterSetName)
-		switch ($PsCmdlet.ParameterSetName) {
-			'RegistryKey' {}
-			'RegistryPath' { $Key = Get-Item -LiteralPath $KeyPath }
-			Default { throw [System.ArgumentException]::new('ParameterSetName {0} does not exist' -f $PsCmdlet.ParameterSetName) }
-		}
-		$acl = $Key.GetAccessControl()
-		$backup = $Key.GetAccessControl()
-		$original = $acl.GetOwner([System.Security.Principal.NTAccount])
-		$acl.SetOwner($Owner)
-		& $ScriptBlock -Key $Key -Acl $acl
-		try {
-			$Key.SetAccessControl($acl)
-		} catch [System.Management.Automation.MethodInvocationException] {
-			if ($_.Exception.InnerException -is [System.UnauthorizedAccessException]) {
-				$Key = Get-RegistryKey -Key $Key
-				$Key.SetAccessControl($acl)
-			} else {
-				throw
-			}
-		}
-		$acl.SetOwner($original)
-		$Key.SetAccessControl($acl)
-		$acl
-	} End {
-		Set-Privilege -Privileges $priv0
-	}
+        [Parameter()]
+        [switch]
+        $UseTransaction
+    )
+
+    Begin {
+        $priv = Get-Privilege
+        $priv0 = Get-Privilege
+        $priv.Enable([Pscx.Interop.TokenPrivilege]::Restore)
+        Set-Privilege -Privileges $priv
+    } Process {
+        Write-Debug -Message ('Bound Parameters:{0}' -f (Out-String -InputObject $PSBoundParameters))
+        Write-Debug -Message ('Parameter Set: {0}' -f $PsCmdlet.ParameterSetName)
+        switch ($PsCmdlet.ParameterSetName) {
+            'RegistryKey' { $KeyPath = $Key.PSPath }
+            'RegistryPath' { $Key = Get-Item -LiteralPath $KeyPath }
+            Default { throw [System.ArgumentException]::new('ParameterSetName {0} does not exist' -f $PsCmdlet.ParameterSetName) }
+        }
+        $acl = $Key.GetAccessControl()
+        $backup = $Key.GetAccessControl()
+        $original = $acl.GetOwner([System.Security.Principal.NTAccount])
+        $acl.SetOwner($Owner)
+        & $ScriptBlock -Key $Key -Acl $acl
+        Set-Acl -LiteralPath $KeyPath -AclObject $acl -UseTransaction:$UseTransaction
+        $acl.SetOwner($original)
+        Set-Acl -LiteralPath $KeyPath -AclObject $acl -UseTransaction:$UseTransaction -Passthru
+    } End {
+        Set-Privilege -Privileges $priv0
+    }
 }
 
 function Get-SecurityDescriptor {

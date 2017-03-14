@@ -127,4 +127,84 @@ Describe "Invoke-AsOwner" {
 			       -ExpectedValue $oldAccess
 		}
 	}
+    Context 'ScriptBlock' {
+        BeforeAll {
+            . $bec
+            $oldAccess = Out-String -InputObject $acl.GetAccessRules($true, $true, [System.Security.Principal.NTAccount])
+            Invoke-AsOwner -Key $TestKey `
+                           -ScriptBlock {
+                Param(
+                  [Microsoft.Win32.RegistryKey]$Key
+                , [System.Security.AccessControl.RegistrySecurity]$Acl
+                )
+                Write-Debug -Message ('ScriptBlock Parameters:{0}' -f (Out-String -InputObject $PSBoundParameters))
+                Set-Variable -Scope 1 -Name sbparam -Value $PSBoundParameters
+                Set-Variable -Scope 1 -Name tempOwner -Value $Acl.GetOwner([System.Security.Principal.NTAccount])
+                $Acl.AddAccessRule(
+                    [System.Security.AccessControl.RegistryAccessRule]::new(
+                      [System.Security.Principal.NTAccount]::new('BUILTIN','Administrators') #$TrustedInstaller
+                    , [System.Security.AccessControl.RegistryRights]::FullControl
+                    , [System.Security.AccessControl.AccessControlType]::Allow
+                    )
+                )
+                Write-Debug -Message ('New access rules:{0}' -f (Out-String -InputObject $Acl.GetAccessRules($true, $false, [System.Security.Principal.NTAccount])))
+            }
+        }
+        AfterAll { . $aec }
+        'Key','Acl' | % {
+            $key = $_
+            It ('Receives {0} parameter' -f $key) {
+                Should -ActualValue $sbparam.ContainsKey($key) -Be -ExpectedValue $true
+            }
+        }
+        It 'Receives ACL with temporary owner' {
+            Should -ActualValue $tempOwner `
+                   -Be `
+                   -ExpectedValue ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Translate([System.Security.Principal.NTAccount]))
+        }
+        It 'Can change object security' {
+            Should -ActualValue (Out-String -InputObject $TestKey.GetAccessControl().GetAccessRules($true, $false, [System.Security.Principal.NTAccount])) `
+                   -Not -Be `
+                   -ExpectedValue $oldAccess
+        }
+    }
+    Context 'Transaction' {
+        BeforeAll {
+            . $bec
+            $oldAccess = Out-String -InputObject $acl.GetAccessRules($true, $true, [System.Security.Principal.NTAccount])
+            Start-Transaction
+            $retval = Invoke-AsOwner -Key $TestKey `
+                                     -ScriptBlock {
+                Param(
+                  [Microsoft.Win32.RegistryKey]$Key
+                , [System.Security.AccessControl.RegistrySecurity]$Acl
+                )
+                Write-Debug -Message ('ScriptBlock Parameters:{0}' -f (Out-String -InputObject $PSBoundParameters))
+                Set-Variable -Scope 1 -Name sbparam -Value $PSBoundParameters
+                Set-Variable -Scope 1 -Name tempOwner -Value $Acl.GetOwner([System.Security.Principal.NTAccount])
+                $Acl.AddAccessRule(
+                    [System.Security.AccessControl.RegistryAccessRule]::new(
+                      [System.Security.Principal.NTAccount]::new('BUILTIN','Administrators') #$TrustedInstaller
+                    , [System.Security.AccessControl.RegistryRights]::FullControl
+                    , [System.Security.AccessControl.AccessControlType]::Allow
+                    )
+                )
+                Write-Debug -Message ('New access rules:{0}' -f (Out-String -InputObject $Acl.GetAccessRules($true, $false, [System.Security.Principal.NTAccount])))
+            } `
+                                     -UseTransaction
+            Undo-Transaction
+            $finalAccess = Out-String -InputObject $TestKey.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Access).GetAccessRules($true, $true, [System.Security.Principal.NTAccount])
+        }
+        AfterAll { . $aec }
+        It 'Can build' {
+            Should -ActualValue (Out-String -InputObject $retval.GetAccessRules($true, $true, [System.Security.Principal.NTAccount])) `
+                   -Not -Be `
+                   -ExpectedValue $oldAccess
+        }
+        It 'Can roll back' {
+            Should -ActualValue $finalAccess `
+                   -Be `
+                   -ExpectedValue $oldAccess
+        }
+    }
 }
