@@ -12,7 +12,6 @@ $TrustedInstaller = [System.Security.Principal.NTAccount]::new('NT SERVICE','Tru
 $Administrators = [System.Security.Principal.NTAccount]::new('BUILTIN','Administrators')
 #endregion
 #Before Each Context
-<#
 $bec = {
 	$TestKey = New-Item -Path $TestKeyPath
 	$acl = $TestKey.GetAccessControl() #[System.Security.AccessControl.AccessControlSections]::None
@@ -54,7 +53,7 @@ Describe "Invoke-AsOwner" {
 				$params[1] = $Key.ToString()
 				Write-Debug -Message ('ScriptBlock Parameters:{0}' -f (Out-String -InputObject $PSBoundParameters))
 			}
-			$function = Get-Item -LiteralPath function:\Invoke-AsOwner
+			$function = Get-Command -Name Invoke-AsOwner
 		}
 		AfterAll {
 			. $aec
@@ -130,7 +129,6 @@ Describe "Invoke-AsOwner" {
 		}
 	}
 }
-#>
 Describe 'Get-SecurityDescriptor' {
 	Context 'Function' {
 		BeforeAll {
@@ -185,10 +183,48 @@ Describe 'Edit-DACL' {
 				       -ExpectedValue $item.Value
 			}
 		}
-		It 'Modified discretionary access control list' {
+		It 'Modifies discretionary access control list' {
 			Should -ActualValue (Out-String -InputObject $newDacl) `
 			       -Not -Be `
 			       -ExpectedValue (Out-String -InputObject $oldDacl)
+		}
+	}
+}
+Describe 'Edit-SACL' {
+	Context 'Function' {
+		BeforeAll {
+			$funcInfo = Get-Command -Name Edit-SACL
+			$sd = [System.Security.AccessControl.RegistrySecurity]::new()
+			$oldSACL = $sd.GetAuditRules($true, $false, [System.Security.Principal.NTAccount])
+			$newSACL = Edit-SACL -InputObject $sd -Modification Add -Identity $TrustedInstaller -AccessMask ([System.Security.AccessControl.RegistryRights]::FullControl) `
+			| % { $_.GetAuditRules($true, $false, [System.Security.Principal.NTAccount]) }
+		}
+		It 'Returns values of type System.Security.AccessControl.CommonObjectSecurity' {
+			Should -ActualValue (($funcInfo.OutputType | % { $_.Name }) -contains 'System.Security.AccessControl.CommonObjectSecurity') `
+			       -Be `
+			       -ExpectedValue $true
+		}
+		@{InputObject=[System.Security.AccessControl.CommonObjectSecurity]
+		  Modification=[System.Security.AccessControl.AccessControlModification]
+		  AuditRule=[System.Security.AccessControl.AuditRule]
+		  Identity=[System.Security.Principal.IdentityReference]
+		  AccessMask=[System.Int32]
+		  IsInherited=[switch]
+		  InheritanceFlags=[System.Security.AccessControl.InheritanceFlags]
+		  PropagationFlags=[System.Security.AccessControl.PropagationFlags]
+		  AuditFlags=[System.Security.AccessControl.AuditFlags]
+		}.GetEnumerator() | % {
+			$item = $_
+			It ('Accepts parameter {0}' -f $item.Key) {
+				Should -ActualValue $funcInfo.Parameters.($item.Key).ParameterType `
+				       -Be `
+				       -ExpectedValue $item.Value
+			}
+		}
+		It 'Modifies system access control list' {
+			Should -ActualValue (Out-String -InputObject $newSACL) `
+			       -Not -Be `
+			       -ExpectedValue (Out-String -InputObject $oldSACL)
 		}
 	}
 }

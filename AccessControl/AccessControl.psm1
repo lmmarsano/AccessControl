@@ -22,6 +22,10 @@ New-Variable -Name NtAdministrators `
              -Description 'Builtin Administrators Group' `
              -Option ReadOnly `
              -Value ([System.Security.Principal.NTAccount]::new('BUILTIN', 'Administrators'))
+New-Variable -Name Everyone `
+             -Description 'Builtin Everyone Group' `
+             -Option ReadOnly `
+             -Value ([System.Security.Principal.NTAccount]::new('NT AUTHORITY', 'Authenticated Users'))
 <#
 .Synopsis
    Temporarily own registry keys and access their ACLs.
@@ -203,60 +207,69 @@ filter Get-RegistryKey {
 
 <#
 .Synopsis
-   Modify DACL.
+	Modify DACL on a Security Descriptor.
 .DESCRIPTION
-   Long description
+	Modifies an input Security Descriptor according to -Modification and a supplied Access rule and outputs the resulting Security Descriptor.
 .EXAMPLE
-   Example of how to use this cmdlet
+	$sd = [System.Security.AccessControl.RegistrySecurity]::new() `
+	| Edit-DACL -Modification Add `
+	            -Identity ([System.Security.Principal.NTAccount]::new('NT SERVICE','TrustedInstaller')) `
+	            -AccessMask ([System.Security.AccessControl.RegistryRights]::FullControl) `
+	| Edit-DACL -Modification Add `
+	            -Identity ([System.Security.Principal.NTAccount]::new('BUILTIN','Administrators')) `
+	            -AccessMask ([System.Security.AccessControl.RegistryRights]::FullControl)
 .EXAMPLE
-   Another example of how to use this cmdlet
+	Another example of how to use this cmdlet
 #>
 function Edit-DACL {
 	[CmdletBinding()]
 	[Alias()]
 	[OutputType([System.Security.AccessControl.CommonObjectSecurity])]
 	Param(
-		# InputObject help description
-		[Parameter(Mandatory=$true,
-					 ValueFromPipeline=$true)]
+		# InputObject Security descriptor to edit.
+		[Parameter( Mandatory=$true
+		          , ValueFromPipeline=$true
+		          )]
 		[System.Security.AccessControl.CommonObjectSecurity]
 		$InputObject,
 
-		# Modification help description
+		# Modification Type of DACL change.
 		[System.Security.AccessControl.AccessControlModification]
 		$Modification,
 
-		# AccessRule
+		# AccessRule AccessRule object.
 		[Parameter(ParameterSetName='RuleObject')]
 		[System.Security.AccessControl.AccessRule]
 		$AccessRule,
 
-		# Identity
+		# Identity Subject an access rule.
 		[Parameter(ParameterSetName='RuleComponents')]
 		[System.Security.Principal.IdentityReference]
 		$Identity=[System.Security.Principal.WindowsIdentity]::GetCurrent().User,
 
-		# AccessMask
-		[Parameter(ParameterSetName='RuleComponents')]
+		# AccessMask Bitwise combination of enumeration values for rights drawn from the security descriptor's type. For the correct enumeration, lookup documentation for the accessMask parameter of your security descriptor's AccessRuleFactory method.
+		[Parameter( ParameterSetName='RuleComponents'
+		          , Mandatory=$true
+		          )]
 		[System.Int32]
-		$AccessMask=-bnot 0,
+		$AccessMask,
 
-		# isInherited
+		# IsInherited Designate the rule as inherited.
 		[Parameter(ParameterSetName='RuleComponents')]
 		[switch]
 		$IsInherited,
 
-		# inheritanceFlags
+		# InheritanceFlags A bitwise combination of flags specifying inheritance for descendants.
 		[Parameter(ParameterSetName='RuleComponents')]
 		[System.Security.AccessControl.InheritanceFlags]
 		$InheritanceFlags=[System.Security.AccessControl.InheritanceFlags]::None,
 
-		# propagationFlags
+		# PropagationFlags A bitwise combination of inheritance modifiers.
 		[Parameter(ParameterSetName='RuleComponents')]
 		[System.Security.AccessControl.PropagationFlags]
 		$PropagationFlags=[System.Security.AccessControl.PropagationFlags]::None,
 
-		# type
+		# Type Access type.
 		[Parameter(ParameterSetName='RuleComponents')]
 		[System.Security.AccessControl.AccessControlType]
 		$Type=[System.Security.AccessControl.AccessControlType]::Allow
@@ -277,6 +290,97 @@ function Edit-DACL {
 
 		if (!$InputObject.ModifyAccessRule($Modification, $AccessRule, [ref]$modified)) {
 			Write-Error -Message 'Unable to modify access rule' -Category InvalidOperation -CategoryReason 'Operation failed' -TargetObject @{InputObject=$InputObject; AccessRule=$AccessRule}
+		}
+		$InputObject
+	} End {
+	}
+}
+
+<#
+.Synopsis
+	Modify SACL on a Security Descriptor.
+.DESCRIPTION
+	Modifies an input Security Descriptor according to -Modification and a supplied Audit rule and outputs the resulting Security Descriptor.
+.EXAMPLE
+	$sd = [System.Security.AccessControl.RegistrySecurity]::new() `
+	| Edit-SACL -Modification Add `
+	            -Identity ([System.Security.Principal.NTAccount]::new('NT SERVICE','TrustedInstaller')) `
+	            -AccessMask ([System.Security.AccessControl.RegistryRights]::FullControl) `
+	| Edit-SACL -Modification Add `
+	            -Identity ([System.Security.Principal.NTAccount]::new('BUILTIN','Administrators')) `
+	            -AccessMask ([System.Security.AccessControl.RegistryRights]::FullControl)
+.EXAMPLE
+	Another example of how to use this cmdlet
+#>
+function Edit-SACL {
+	[CmdletBinding()]
+	[Alias()]
+	[OutputType([System.Security.AccessControl.CommonObjectSecurity])]
+	Param(
+		# InputObject Security descriptor to edit.
+		[Parameter( Mandatory=$true
+		          , ValueFromPipeline=$true
+		          )]
+		[System.Security.AccessControl.CommonObjectSecurity]
+		$InputObject,
+
+		# Modification Type of SACL change.
+		[System.Security.AccessControl.AccessControlModification]
+		$Modification,
+
+		# AuditRule AuditRule object.
+		[Parameter(ParameterSetName='RuleObject')]
+		[System.Security.AccessControl.AuditRule]
+		$AuditRule,
+
+		# Identity Subject of an audit rule.
+		[Parameter(ParameterSetName='RuleComponents')]
+		[System.Security.Principal.IdentityReference]
+		$Identity=$Everyone,
+
+		# AccessMask Bitwise combination of enumeration values for rights drawn from the security descriptor's type. For the correct enumeration, lookup documentation for the accessMask parameter of your security descriptor's AuditRuleFactory method.
+		[Parameter( ParameterSetName='RuleComponents'
+		          , Mandatory=$true
+		          )]
+		[System.Int32]
+		$AccessMask,
+
+		# IsInherited Designate the rule as inherited.
+		[Parameter(ParameterSetName='RuleComponents')]
+		[switch]
+		$IsInherited,
+
+		# InheritanceFlags A bitwise combination of flags specifying inheritance for descendants.
+		[Parameter(ParameterSetName='RuleComponents')]
+		[System.Security.AccessControl.InheritanceFlags]
+		$InheritanceFlags=[System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit,
+
+		# PropagationFlags A bitwise combination of inheritance modifiers.
+		[Parameter(ParameterSetName='RuleComponents')]
+		[System.Security.AccessControl.PropagationFlags]
+		$PropagationFlags=[System.Security.AccessControl.PropagationFlags]::None,
+
+		# AuditFlags Bitwise combination of access outcomes to audit.
+		[Parameter(ParameterSetName='RuleComponents')]
+		[System.Security.AccessControl.AuditFlags]
+		$AuditFlags=[System.Security.AccessControl.AuditFlags]::Success
+	)
+
+	Begin {
+		New-Variable -Name modified
+	} Process {
+		if (!$PSBoundParameters.ContainsKey('AuditRule')) {
+			switch ($PSCmdlet.ParameterSetName) {
+				'RuleObject' {}
+				'RuleComponents' {
+					$AuditRule = $InputObject.AuditRuleFactory($Identity, $AccessMask, $IsInherited, $InheritanceFlags, $PropagationFlags, $AuditFlags)
+				}
+				Default { throw [System.ArgumentException]::new('ParameterSetName {0} does not exist' -f $PsCmdlet.ParameterSetName) }
+			}
+		}
+
+		if (!$InputObject.ModifyAuditRule($Modification, $AuditRule, [ref]$modified)) {
+			Write-Error -Message 'Unable to modify audit rule' -Category InvalidOperation -CategoryReason 'Operation failed' -TargetObject @{InputObject=$InputObject; AuditRule=$AuditRule}
 		}
 		$InputObject
 	} End {
