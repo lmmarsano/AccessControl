@@ -1,6 +1,7 @@
 Set-StrictMode -Version latest
 
-Enum ComAccessMask {
+Enum ComRights {
+	None = 0
 	Execute = 1
 	ExecuteLocal = 2
 	ExecuteRemote = 4
@@ -28,14 +29,13 @@ New-Variable -Name AuthenticatedUsers `
              -Value ([System.Security.Principal.NTAccount]::new('NT AUTHORITY', 'Authenticated Users'))
 <#
 .Synopsis
-   Temporarily own registry keys and access their ACLs.
+	Temporarily own registry keys and access their ACLs.
 .DESCRIPTION
-   The function retrieves a registry key's ACL and temporarily swaps its owner during a scriptblock call.
-
+	The function retrieves a registry key's ACL and temporarily swaps its owner during a scriptblock call.
 .EXAMPLE
-   Example of how to use this cmdlet
+	Example of how to use this cmdlet
 .EXAMPLE
-   Another example of how to use this cmdlet
+	Another example of how to use this cmdlet
 #>
 function Invoke-AsOwner {
 	[CmdletBinding()]
@@ -509,7 +509,7 @@ filter Get-IdentityReference {
 		[System.Security.Principal.WellKnownSidType]
 		$WellKnownType,
 
-		# DomainIdentifier Domain identity reference. Default: current user's domain.
+		# DomainIdentifier Domain identity reference. Only domain-specific accounts require this. Otherwise, it's ignored. See documentation of System.Security.Principal.WellKnownSidType http://msdn.microsoft.com/en-us/library/system.security.principal.wellknownsidtype.aspx for a list of those accounts. Default: current user's domain.
 		[Parameter( ParameterSetName='WellKnown'
 		          , ValueFromPipelineByPropertyName=$true
 		          )]
@@ -540,4 +540,56 @@ filter Get-IdentityReference {
 		'ID' { $IdentityReference.Translate([System.Security.Principal.NTAccount]) }
 		Default { throw [System.ArgumentException]::new('ParameterSetName {0} does not exist' -f $PsCmdlet.ParameterSetName) }
 	}
+}
+
+function New-DComAce {
+	[CmdletBinding()]
+	[Alias()]
+	#[OutputType([System.Security.Principal.IdentityReference])]
+	param(
+		[Parameter(Mandatory=$true)]
+		[System.Security.Principal.IdentityReference] 
+		$IdRef,
+ 
+		[string] 
+		$ComputerName = '.',
+
+		# AccessMask Bitwise combination of COM access rights.
+		[Parameter(Mandatory=$true)]
+		[ComRights]
+		$AccessMask = [ComRights]::Execute -bor [ComRights]::ExecuteLocal -bor [ComRights]::ActivateLocal,
+
+		# AceFlags A bitwise combination of flags specifying inheritance and auditing.
+		[System.Security.AccessControl.AceFlags]
+		$AceFlags = [System.Security.AccessControl.AceFlags]::ContainerInherit -bor [System.Security.AccessControl.AceFlags]::ObjectInherit,
+
+		# Type Access type.
+		[System.Security.AccessControl.AccessControlType]
+		$Type=[System.Security.AccessControl.AccessControlType]::Allow
+	)
+ 
+	#Create the Trusteee Object
+	#Win32_SID Key String SID String AccountName String ReferencedDomainName
+	#Associated with Win32_Account Key String Name Key String Domain
+	#Win32_Trustee UInt8Array SID String SIDString
+	$Trustee = ([WMIClass]('\\{0}\root\cimv2:Win32_Trustee"' -f $ComputerName)).CreateInstance()
+	$Domain,$Name = $IdRef.Translate([System.Security.Principal.NTAccount]).Value.Split('\', 2)
+ 
+	#Get the SID for the found account.
+	$accountSID = [WMI]('\\{0}\root\cimv2:Win32_SID.SID=''{1}''' -f $ComputerName,$IdRef.Translate([securityidentifier]).Value)
+ 
+	#Setup Trusteee object
+	$Trustee.Domain = $Domain
+	$Trustee.Name = $Name
+	$Trustee.SID = $accountSID.BinaryRepresentation
+ 
+	#Create ACE (Access Control List) object.
+	$ACE = ([WMIClass]('\\{0}\root\cimv2:Win32_ACE' -f $ComputerName)).CreateInstance()
+ 
+	#Setup the rest of the ACE.
+	$ACE.AccessMask = $AccessMask
+	$ACE.AceFlags = $AceFlags
+	$ACE.AceType = $Type
+	$ACE.Trustee = $Trustee
+	$ACE
 }

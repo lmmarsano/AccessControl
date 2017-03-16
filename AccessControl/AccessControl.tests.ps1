@@ -12,6 +12,7 @@ $TrustedInstaller = [System.Security.Principal.NTAccount]::new('NT SERVICE','Tru
 $Administrators = [System.Security.Principal.NTAccount]::new('BUILTIN','Administrators')
 #endregion
 #Before Each Context
+<#
 $bec = {
 	$TestKey = New-Item -Path $TestKeyPath
 	$acl = $TestKey.GetAccessControl() #[System.Security.AccessControl.AccessControlSections]::None
@@ -282,6 +283,7 @@ Describe 'Edit-SecurityDescriptor' {
 		}
 	}
 }
+#>
 Describe 'Get-IdentityReference' {
 	Context 'Function' {
 		BeforeAll {
