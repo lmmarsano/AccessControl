@@ -30,6 +30,7 @@ $bec = {
 $aec = {
 	Remove-Item -LiteralPath $TestKeyPath
 }
+<#
 Describe "Invoke-AsOwner" {
 	Context "Function Exists" {
 		BeforeAll {
@@ -225,6 +226,61 @@ Describe 'Edit-SACL' {
 			Should -ActualValue (Out-String -InputObject $newSACL) `
 			       -Not -Be `
 			       -ExpectedValue (Out-String -InputObject $oldSACL)
+		}
+	}
+}
+#>
+Describe 'Edit-SecurityDescriptor' {
+	Context 'Function' {
+		BeforeAll {
+			$TestKey = New-Item -Path $TestKeyPath
+			$funcInfo = Get-Command -Name Edit-SecurityDescriptor
+			$self = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Translate([System.Security.Principal.NTAccount])
+			$dacl = $TestKey | % { $_.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Access).GetAccessRules($true,$true,[System.Security.Principal.NTAccount]) }
+			$everyone = [System.Security.Principal.NTAccount]::new('Everyone')
+			$sd = [System.Security.AccessControl.RegistrySecurity]::new()
+			$oldDacl = $sd.GetAccessRules($true,$true,[System.Security.Principal.NTAccount])
+			$oldSacl = $sd.GetAuditRules($true,$true,[System.Security.Principal.NTAccount])
+			$sd = Edit-SecurityDescriptor -InputObject $sd -Owner $self -Group $everyone -Dacl $dacl -Sacl $sd.AuditRuleFactory($self,[System.Security.AccessControl.RegistryRights]::WriteKey,$false,[System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit,[System.Security.AccessControl.PropagationFlags]::None,[System.Security.AccessControl.AuditFlags]::Success)
+		}
+		AfterAll { . $aec }
+		It 'Returns values of type System.Security.AccessControl.CommonObjectSecurity' {
+			Should -ActualValue (($funcInfo.OutputType | % { $_.Name }) -contains 'System.Security.AccessControl.CommonObjectSecurity') `
+			       -Be `
+			       -ExpectedValue $true
+		}
+		@{InputObject=[System.Security.AccessControl.CommonObjectSecurity]
+		  Owner=[System.Security.Principal.IdentityReference]
+		  Group=[System.Security.Principal.IdentityReference]
+		  Dacl=[System.Object]
+		  Sacl=[System.Object]
+		}.GetEnumerator() | % {
+			$item = $_
+			It ('Accepts parameter {0}' -f $item.Key) {
+				Should -ActualValue $funcInfo.Parameters.($item.Key).ParameterType `
+				       -Be `
+				       -ExpectedValue $item.Value
+			}
+		}
+		It 'Modifies owner' {
+			Should -ActualValue $sd.GetOwner([System.Security.Principal.NTAccount]) `
+			       -Be `
+			       -ExpectedValue $self
+		}
+		It 'Modifies primary group' {
+			Should -ActualValue $sd.GetGroup([System.Security.Principal.NTAccount]) `
+			       -Be `
+			       -ExpectedValue $everyone
+		}
+		It 'Modifies access' {
+			Should -ActualValue (Out-String -InputObject $sd.GetAccessRules($true,$true,[System.Security.Principal.NTAccount])) `
+			       -Not -Be `
+			       -ExpectedValue (Out-String -InputObject $OldDacl)
+		}
+		It 'Modifies audit' {
+			Should -ActualValue (Out-String -InputObject $sd.GetAuditRules($true,$true,[System.Security.Principal.NTAccount])) `
+			       -Not -Be `
+			       -ExpectedValue (Out-String -InputObject $OldSacl)
 		}
 	}
 }

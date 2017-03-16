@@ -230,6 +230,7 @@ function Edit-DACL {
 		[Parameter( Mandatory=$true
 		          , ValueFromPipeline=$true
 		          )]
+		[Alias('SecurityDescriptor')]
 		[System.Security.AccessControl.CommonObjectSecurity]
 		$InputObject,
 
@@ -238,7 +239,9 @@ function Edit-DACL {
 		$Modification,
 
 		# AccessRule AccessRule object.
-		[Parameter(ParameterSetName='RuleObject')]
+		[Parameter( ParameterSetName='RuleObject'
+		          , ValueFromPipeline=$true
+		          )]
 		[System.Security.AccessControl.AccessRule]
 		$AccessRule,
 
@@ -289,7 +292,10 @@ function Edit-DACL {
 		}
 
 		if (!$InputObject.ModifyAccessRule($Modification, $AccessRule, [ref]$modified)) {
-			Write-Error -Message 'Unable to modify access rule' -Category InvalidOperation -CategoryReason 'Operation failed' -TargetObject @{InputObject=$InputObject; AccessRule=$AccessRule}
+			Write-Error -Message 'Unable to modify access rule' `
+			            -Category InvalidOperation `
+			            -CategoryReason 'Operation failed' `
+			            -TargetObject @{InputObject=$InputObject; AccessRule=$AccessRule}
 		}
 		$InputObject
 	} End {
@@ -321,6 +327,7 @@ function Edit-SACL {
 		[Parameter( Mandatory=$true
 		          , ValueFromPipeline=$true
 		          )]
+		[Alias('SecurityDescriptor')]
 		[System.Security.AccessControl.CommonObjectSecurity]
 		$InputObject,
 
@@ -329,7 +336,9 @@ function Edit-SACL {
 		$Modification,
 
 		# AuditRule AuditRule object.
-		[Parameter(ParameterSetName='RuleObject')]
+		[Parameter( ParameterSetName='RuleObject'
+		          , ValueFromPipeline=$true
+		          )]
 		[System.Security.AccessControl.AuditRule]
 		$AuditRule,
 
@@ -380,9 +389,97 @@ function Edit-SACL {
 		}
 
 		if (!$InputObject.ModifyAuditRule($Modification, $AuditRule, [ref]$modified)) {
-			Write-Error -Message 'Unable to modify audit rule' -Category InvalidOperation -CategoryReason 'Operation failed' -TargetObject @{InputObject=$InputObject; AuditRule=$AuditRule}
+			Write-Error -Message 'Unable to modify audit rule' `
+			            -Category InvalidOperation `
+			            -CategoryReason 'Operation failed' `
+			            -TargetObject @{InputObject=$InputObject; AuditRule=$AuditRule}
 		}
 		$InputObject
 	} End {
+	}
+}
+
+<#
+.Synopsis
+	Edit security descriptor.
+.DESCRIPTION
+	Modifies owner, primary group, discretionary access control list, system access control list specified in a security descriptor.
+.EXAMPLE
+	$sd = Edit-SecurityDescriptor -InputObject [System.Security.AccessControl.RegistrySecurity]::new() `
+	                              -Owner ([System.Security.Principal.NTAccount]::new('BUILTIN','Administrator')) `
+	                              -Group ([System.Security.Principal.NTAccount]::new('BUILTIN','Administrators'))
+.EXAMPLE
+	Another example of how to use this cmdlet
+#>
+function Edit-SecurityDescriptor {
+	[CmdletBinding()]
+	[Alias()]
+	[OutputType([System.Security.AccessControl.CommonObjectSecurity])]
+	Param(
+		# InputObject Security descriptor to edit.
+		[Parameter( Mandatory=$true
+		          , ValueFromPipeline=$true
+		          )]
+		[Alias('SecurityDescriptor')]
+		[System.Security.AccessControl.CommonObjectSecurity]
+		$InputObject,
+
+		# Owner User or group.
+		[System.Security.Principal.IdentityReference]
+		$Owner,
+
+		# Group Primary group.
+		[System.Security.Principal.IdentityReference]
+		$Group,
+
+		# Dacl Discretionary ACL.
+		$Dacl,
+
+		# Sacl System ACL.
+		$Sacl
+	)
+	Begin {
+		New-Variable -Name modified
+	} Process {
+		if ($null -ne $Owner) {
+			$InputObject.SetOwner($Owner)
+		}
+		if ($null -ne $Group) {
+			$InputObject.SetGroup($Group)
+		}
+		if ($null -ne $Dacl) {
+			if (!$InputObject.ModifyAccessRule([System.Security.AccessControl.AccessControlModification]::Set, $Dacl[0], [ref]$modified)) {
+				Write-Error -Message 'Unable to set access rule' `
+				            -Category InvalidOperation `
+				            -CategoryReason 'Operation failed' `
+				            -TargetObject @{InputObject=$InputObject; AccessRule=$Dacl[0]}
+			}
+			$Dacl | Select-Object -Skip 1 | % {
+				#Write-Debug -Message ('Access Rule{0}' -f (Out-String -InputObject $_))
+				if (!$InputObject.ModifyAccessRule([System.Security.AccessControl.AccessControlModification]::Add, $_, [ref]$modified)) {
+					Write-Error -Message 'Unable to add access rule' `
+					            -Category InvalidOperation `
+					            -CategoryReason 'Operation failed' `
+					            -TargetObject @{InputObject=$InputObject; AccessRule=$_}
+				}
+			}
+		}
+		if ($null -ne $Sacl) {
+			if (!$InputObject.ModifyAuditRule([System.Security.AccessControl.AccessControlModification]::Set, $Sacl[0], [ref]$modified)) {
+				Write-Error -Message 'Unable to set audit rule' `
+				            -Category InvalidOperation `
+				            -CategoryReason 'Operation failed' `
+				            -TargetObject @{InputObject=$InputObject; AuditRule=$Sacl[0]}
+			}
+			$Sacl | Select-Object -Skip 1 | % {
+				if (!$InputObject.ModifyAuditRule([System.Security.AccessControl.AccessControlModification]::Add, $_, [ref]$modified)) {
+					Write-Error -Message 'Unable to add audit rule' `
+					            -Category InvalidOperation `
+					            -CategoryReason 'Operation failed' `
+					            -TargetObject @{InputObject=$InputObject; AuditRule=$_}
+				}
+			}
+		}
+		$InputObject
 	}
 }
