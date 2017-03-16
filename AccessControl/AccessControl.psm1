@@ -104,6 +104,7 @@ function Invoke-AsOwner {
 
 function Get-SecurityDescriptor {
 	[CmdletBinding(DefaultParameterSetName='ByPath', HelpUri='http://go.microsoft.com/fwlink/?LinkID=113305')]
+	[OutputType([System.Security.AccessControl.CommonObjectSecurity])]
 	param(
 		[Parameter(ParameterSetName='ByPath', Position=0, ValueFromPipeline=$true, ValueFromPipelineByPropertyName=$true)]
 		[ValidateNotNullOrEmpty()]
@@ -139,24 +140,20 @@ function Get-SecurityDescriptor {
 		${Exclude})
 
 	begin {
-	if ($Audit) {
-		$AccessControlSections = $AccessControlSections -bor [System.Security.AccessControl.AccessControlSections]::Audit
-	}
-	'AccessControlSections','AllCentralAccessPolicies' | % {
-		$PSBoundParameters.Remove($_)
-	}
+		if ($Audit) {
+			$AccessControlSections = $AccessControlSections -bor [System.Security.AccessControl.AccessControlSections]::Audit
+		}
+		'AccessControlSections','AllCentralAccessPolicies','Audit' | % {
+			[void]$PSBoundParameters.Remove($_)
+		}
 	} process {
-	@(switch ($x) {
-		'ByInputObject' { $InputObject }
-		{$_ -in 'ByPath','ByLiteralPath'} { Get-Item @PSBoundParameters }
-		Default {}
-	}) | % { $_.GetAccessControl($AccessControlSections) }
-	} end {
-		@(switch ($x) {
+		@(switch ($PSCmdlet.ParameterSetName) {
 			'ByInputObject' { $InputObject }
 			{$_ -in 'ByPath','ByLiteralPath'} { Get-Item @PSBoundParameters }
 			Default {}
 		}) | % { $_.GetAccessControl($AccessControlSections) }
+    # PrivilegeNotHeldException
+	} end {
 	}
 }
 <#
@@ -166,85 +163,11 @@ function Get-SecurityDescriptor {
 
 #>
 
-function Set-SecurityDescriptor {
-	[CmdletBinding(DefaultParameterSetName='ByPath', SupportsShouldProcess=$true, ConfirmImpact='Medium', SupportsTransactions=$true, HelpUri='http://go.microsoft.com/fwlink/?LinkID=113389')]
-	param(
-		[Parameter(ParameterSetName='ByPath', Mandatory=$true, Position=0, ValueFromPipelineByPropertyName=$true)]
-		[string[]]
-		${Path},
-
-		[Parameter(ParameterSetName='ByInputObject', Mandatory=$true, Position=0, ValueFromPipelineByPropertyName=$true)]
-		[psobject]
-		${InputObject},
-
-		[Parameter(ParameterSetName='ByLiteralPath', Mandatory=$true, ValueFromPipelineByPropertyName=$true)]
-		[Alias('PSPath')]
-		[string[]]
-		${LiteralPath},
-
-		[Parameter(ParameterSetName='ByInputObject', Mandatory=$true, Position=1, ValueFromPipeline=$true)]
-		[Parameter(ParameterSetName='ByLiteralPath', Mandatory=$true, Position=1, ValueFromPipeline=$true)]
-		[Parameter(ParameterSetName='ByPath', Mandatory=$true, Position=1, ValueFromPipeline=$true)]
-		[System.Object]
-		${AclObject},
-
-		[Parameter(ParameterSetName='ByPath', Position=2, ValueFromPipelineByPropertyName=$true)]
-		[Parameter(ParameterSetName='ByLiteralPath', Position=2, ValueFromPipelineByPropertyName=$true)]
-		[string]
-		${CentralAccessPolicy},
-
-		[Parameter(ParameterSetName='ByPath')]
-		[Parameter(ParameterSetName='ByLiteralPath')]
-		[switch]
-		${ClearCentralAccessPolicy},
-
-		[switch]
-		${Passthru},
-
-		[string]
-		${Filter},
-
-		[string[]]
-		${Include},
-
-		[string[]]
-		${Exclude})
-
-	begin
-	{
-		$outBuffer = $null
-		if ($PSBoundParameters.TryGetValue('OutBuffer', [ref]$outBuffer))
-		{
-			$PSBoundParameters['OutBuffer'] = 1
-		}
-		$wrappedCmd = $ExecutionContext.InvokeCommand.GetCommand('Microsoft.PowerShell.Security\Set-Acl', [System.Management.Automation.CommandTypes]::Cmdlet)
-		$scriptCmd = {& $wrappedCmd @PSBoundParameters }
-		$steppablePipeline = $scriptCmd.GetSteppablePipeline($myInvocation.CommandOrigin)
-		$steppablePipeline.Begin($PSCmdlet)
-	}
-
-	process
-	{
-		$steppablePipeline.Process($_)
-	}
-
-	end
-	{
-		$steppablePipeline.End()
-	}
-}
-<#
-
-.ForwardHelpTargetName Microsoft.PowerShell.Security\Set-Acl
-.ForwardHelpCategory Cmdlet
-
-#>
-
 <#
 .Synopsis
 	Returns writable registry key.
 .DESCRIPTION
-	Long description
+	Reopens registry key in writable mode that accepts security descriptor changes.
 .EXAMPLE
 	Example of how to use this cmdlet
 .EXAMPLE
@@ -273,7 +196,89 @@ filter Get-RegistryKey {
 	Write-Verbose -Message ('Accessing root {0} subkey {1}' -f $root,$subkey)
 	$Key = [Microsoft.Win32.Registry]::$root
 	if ($subkey) {
-	$Key = $Key.OpenSubKey($subkey, !$ReadOnly)
+		$Key = $Key.OpenSubKey($subkey, !$ReadOnly)
 	}
 	$Key
+}
+
+<#
+.Synopsis
+   Modify DACL.
+.DESCRIPTION
+   Long description
+.EXAMPLE
+   Example of how to use this cmdlet
+.EXAMPLE
+   Another example of how to use this cmdlet
+#>
+function Edit-DACL {
+	[CmdletBinding()]
+	[Alias()]
+	[OutputType([System.Security.AccessControl.CommonObjectSecurity])]
+	Param(
+		# InputObject help description
+		[Parameter(Mandatory=$true,
+					 ValueFromPipeline=$true)]
+		[System.Security.AccessControl.CommonObjectSecurity]
+		$InputObject,
+
+		# Modification help description
+		[System.Security.AccessControl.AccessControlModification]
+		$Modification,
+
+		# AccessRule
+		[Parameter(ParameterSetName='RuleObject')]
+		[System.Security.AccessControl.AccessRule]
+		$AccessRule,
+
+		# Identity
+		[Parameter(ParameterSetName='RuleComponents')]
+		[System.Security.Principal.IdentityReference]
+		$Identity=[System.Security.Principal.WindowsIdentity]::GetCurrent().User,
+
+		# AccessMask
+		[Parameter(ParameterSetName='RuleComponents')]
+		[System.Int32]
+		$AccessMask=-bnot 0,
+
+		# isInherited
+		[Parameter(ParameterSetName='RuleComponents')]
+		[switch]
+		$IsInherited,
+
+		# inheritanceFlags
+		[Parameter(ParameterSetName='RuleComponents')]
+		[System.Security.AccessControl.InheritanceFlags]
+		$InheritanceFlags=[System.Security.AccessControl.InheritanceFlags]::None,
+
+		# propagationFlags
+		[Parameter(ParameterSetName='RuleComponents')]
+		[System.Security.AccessControl.PropagationFlags]
+		$PropagationFlags=[System.Security.AccessControl.PropagationFlags]::None,
+
+		# type
+		[Parameter(ParameterSetName='RuleComponents')]
+		[System.Security.AccessControl.AccessControlType]
+		$Type=[System.Security.AccessControl.AccessControlType]::Allow
+	)
+
+	Begin {
+		New-Variable -Name modified
+	} Process {
+		if (!$PSBoundParameters.ContainsKey('AccessRule')) {
+			switch ($PSCmdlet.ParameterSetName) {
+				'RuleObject' {}
+				'RuleComponents' {
+					$AccessRule = $InputObject.AccessRuleFactory($Identity, $AccessMask, $IsInherited, $InheritanceFlags, $PropagationFlags, $Type)
+				}
+				Default { throw [System.ArgumentException]::new('ParameterSetName {0} does not exist' -f $PsCmdlet.ParameterSetName) }
+			}
+		}
+
+		if (!$InputObject.ModifyAccessRule($Modification, $AccessRule, [ref]$modified)) {
+			Write-Error -Message 'Unable to modify access rule' -Category InvalidOperation -CategoryReason 'Operation failed' -TargetObject @{InputObject=$InputObject; AccessRule=$AccessRule}
+		}
+		$InputObject
+	} End {
+	}
 }

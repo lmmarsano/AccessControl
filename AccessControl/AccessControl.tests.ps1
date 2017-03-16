@@ -9,8 +9,10 @@ $ModuleName = [io.path]::GetFileName($PSScriptRoot)
 Import-Module "$PSScriptRoot\$ModuleName.psd1" -Scope Local -Force
 $TestKeyPath = 'registry::HKEY_CURRENT_USER\SOFTWARE\Test'
 $TrustedInstaller = [System.Security.Principal.NTAccount]::new('NT SERVICE','TrustedInstaller')
+$Administrators = [System.Security.Principal.NTAccount]::new('BUILTIN','Administrators')
 #endregion
 #Before Each Context
+<#
 $bec = {
 	$TestKey = New-Item -Path $TestKeyPath
 	$acl = $TestKey.GetAccessControl() #[System.Security.AccessControl.AccessControlSections]::None
@@ -59,31 +61,31 @@ Describe "Invoke-AsOwner" {
 		}
 		It "Returns values of type System.Security.AccessControl" {
 			Should -ActualValue $retval `
-							-BeOfType `
-							-ExpectedType System.Security.AccessControl.CommonObjectSecurity
+			       -BeOfType `
+			       -ExpectedType System.Security.AccessControl.CommonObjectSecurity
 		}
 		It 'Returns Key''s ACL' {
 			Should -ActualValue $TestKey.GetAccessControl().GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::All) `
-							-Be `
-							-ExpectedValue $retval.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::All)
+			       -Be `
+			       -ExpectedValue $retval.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::All)
 		}
 		It 'Restores Owner' {
 			Should -ActualValue $TestKey.GetAccessControl().GetOwner([System.Security.Principal.NTAccount]) `
-					-Be `
-					-ExpectedValue $TrustedInstaller
+			       -Be `
+			       -ExpectedValue $TrustedInstaller
 		}
 		'Key','KeyPath','ScriptBlock' | % {
 			$key = $_
 			It ('Accepts Parameter {0}' -f $key) {
 			Should -ActualValue $function.Parameters.ContainsKey($key) `
-					-Be `
-					-ExpectedValue $true
+			       -Be `
+			       -ExpectedValue $true
 			}
 		}
 		It 'Treats key and its path alike' {
 			Should -ActualValue $params[0] `
-					-Be `
-					-ExpectedValue $params[1]
+			       -Be `
+			       -ExpectedValue $params[1]
 		}
 	}
 	Context 'ScriptBlock' {
@@ -101,7 +103,7 @@ Describe "Invoke-AsOwner" {
 				Set-Variable -Scope 1 -Name tempOwner -Value $Acl.GetOwner([System.Security.Principal.NTAccount])
 				$Acl.AddAccessRule(
 					[System.Security.AccessControl.RegistryAccessRule]::new(
-					  [System.Security.Principal.NTAccount]::new('BUILTIN','Administrators') #$TrustedInstaller
+					  $Administrators #$TrustedInstaller
 					, [System.Security.AccessControl.RegistryRights]::FullControl
 					, [System.Security.AccessControl.AccessControlType]::Allow
 					)
@@ -125,6 +127,68 @@ Describe "Invoke-AsOwner" {
 			Should -ActualValue (Out-String -InputObject $TestKey.GetAccessControl().GetAccessRules($true, $false, [System.Security.Principal.NTAccount])) `
 			       -Not -Be `
 			       -ExpectedValue $oldAccess
+		}
+	}
+}
+#>
+Describe 'Get-SecurityDescriptor' {
+	Context 'Function' {
+		BeforeAll {
+			$funcInfo = Get-Command -Name Get-SecurityDescriptor
+			$sd = Get-SecurityDescriptor -LiteralPath registry::HKEY_CURRENT_USER\SOFTWARE -AccessControlSections Owner
+		}
+		It 'Returns values of type System.Security.AccessControl.CommonObjectSecurity' {
+			Should -ActualValue (($funcInfo.OutputType | % { $_.Name }) -contains 'System.Security.AccessControl.CommonObjectSecurity') `
+			       -Be `
+			       -ExpectedValue $true
+		}
+		It 'Accepts parameter AccessControlSections' {
+			Should -ActualValue $funcInfo.Parameters.AccessControlSections.ParameterType `
+			       -Be `
+			       -ExpectedValue ([System.Security.AccessControl.AccessControlSections])
+		}
+		It 'Restricts sections to AccessControlSections' {
+			Should -ActualValue $sd.GetGroup([System.Security.Principal.NTAccount]) `
+			       -BeExactly `
+			       -ExpectedValue $null
+		}
+	}
+}
+Describe 'Edit-DACL' {
+	Context 'Function' {
+		BeforeAll {
+			$funcInfo = Get-Command -Name Edit-DACL
+			$sd = [System.Security.AccessControl.RegistrySecurity]::new()
+			$oldDacl = $sd.GetAccessRules($true, $false, [System.Security.Principal.NTAccount])
+			$newDacl = Edit-DACL -InputObject $sd -Modification Add -Identity $TrustedInstaller -AccessMask ([System.Security.AccessControl.RegistryRights]::FullControl) `
+			| % { $_.GetAccessRules($true, $false, [System.Security.Principal.NTAccount]) }
+		}
+		It 'Returns values of type System.Security.AccessControl.CommonObjectSecurity' {
+			Should -ActualValue (($funcInfo.OutputType | % { $_.Name }) -contains 'System.Security.AccessControl.CommonObjectSecurity') `
+			       -Be `
+			       -ExpectedValue $true
+		}
+		@{InputObject=[System.Security.AccessControl.CommonObjectSecurity]
+		  Modification=[System.Security.AccessControl.AccessControlModification]
+		  AccessRule=[System.Security.AccessControl.AccessRule]
+		  Identity=[System.Security.Principal.IdentityReference]
+		  AccessMask=[System.Int32]
+		  IsInherited=[switch]
+		  InheritanceFlags=[System.Security.AccessControl.InheritanceFlags]
+		  PropagationFlags=[System.Security.AccessControl.PropagationFlags]
+		  Type=[System.Security.AccessControl.AccessControlType]
+		}.GetEnumerator() | % {
+			$item = $_
+			It ('Accepts parameter {0}' -f $item.Key) {
+				Should -ActualValue $funcInfo.Parameters.($item.Key).ParameterType `
+				       -Be `
+				       -ExpectedValue $item.Value
+			}
+		}
+		It 'Modified discretionary access control list' {
+			Should -ActualValue (Out-String -InputObject $newDacl) `
+			       -Not -Be `
+			       -ExpectedValue (Out-String -InputObject $oldDacl)
 		}
 	}
 }
