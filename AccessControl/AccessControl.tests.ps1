@@ -30,7 +30,6 @@ $bec = {
 $aec = {
 	Remove-Item -LiteralPath $TestKeyPath
 }
-<#
 Describe "Invoke-AsOwner" {
 	Context "Function Exists" {
 		BeforeAll {
@@ -159,7 +158,7 @@ Describe 'Edit-DACL' {
 			$funcInfo = Get-Command -Name Edit-DACL
 			$sd = [System.Security.AccessControl.RegistrySecurity]::new()
 			$oldDacl = $sd.GetAccessRules($true, $false, [System.Security.Principal.NTAccount])
-			$newDacl = Edit-DACL -InputObject $sd -Modification Add -Identity $TrustedInstaller -AccessMask ([System.Security.AccessControl.RegistryRights]::FullControl) `
+			$newDacl = Edit-DACL -InputObject $sd -Modification Add -Trustee $TrustedInstaller -AccessMask ([System.Security.AccessControl.RegistryRights]::FullControl) `
 			| % { $_.GetAccessRules($true, $false, [System.Security.Principal.NTAccount]) }
 		}
 		It 'Returns values of type System.Security.AccessControl.CommonObjectSecurity' {
@@ -170,7 +169,7 @@ Describe 'Edit-DACL' {
 		@{InputObject=[System.Security.AccessControl.CommonObjectSecurity]
 		  Modification=[System.Security.AccessControl.AccessControlModification]
 		  AccessRule=[System.Security.AccessControl.AccessRule]
-		  Identity=[System.Security.Principal.IdentityReference]
+		  Trustee=[System.Security.Principal.IdentityReference]
 		  AccessMask=[System.Int32]
 		  IsInherited=[switch]
 		  InheritanceFlags=[System.Security.AccessControl.InheritanceFlags]
@@ -197,7 +196,7 @@ Describe 'Edit-SACL' {
 			$funcInfo = Get-Command -Name Edit-SACL
 			$sd = [System.Security.AccessControl.RegistrySecurity]::new()
 			$oldSACL = $sd.GetAuditRules($true, $false, [System.Security.Principal.NTAccount])
-			$newSACL = Edit-SACL -InputObject $sd -Modification Add -Identity $TrustedInstaller -AccessMask ([System.Security.AccessControl.RegistryRights]::FullControl) `
+			$newSACL = Edit-SACL -InputObject $sd -Modification Add -Trustee $TrustedInstaller -AccessMask ([System.Security.AccessControl.RegistryRights]::FullControl) `
 			| % { $_.GetAuditRules($true, $false, [System.Security.Principal.NTAccount]) }
 		}
 		It 'Returns values of type System.Security.AccessControl.CommonObjectSecurity' {
@@ -208,7 +207,7 @@ Describe 'Edit-SACL' {
 		@{InputObject=[System.Security.AccessControl.CommonObjectSecurity]
 		  Modification=[System.Security.AccessControl.AccessControlModification]
 		  AuditRule=[System.Security.AccessControl.AuditRule]
-		  Identity=[System.Security.Principal.IdentityReference]
+		  Trustee=[System.Security.Principal.IdentityReference]
 		  AccessMask=[System.Int32]
 		  IsInherited=[switch]
 		  InheritanceFlags=[System.Security.AccessControl.InheritanceFlags]
@@ -229,7 +228,6 @@ Describe 'Edit-SACL' {
 		}
 	}
 }
-#>
 Describe 'Edit-SecurityDescriptor' {
 	Context 'Function' {
 		BeforeAll {
@@ -281,6 +279,56 @@ Describe 'Edit-SecurityDescriptor' {
 			Should -ActualValue (Out-String -InputObject $sd.GetAuditRules($true,$true,[System.Security.Principal.NTAccount])) `
 			       -Not -Be `
 			       -ExpectedValue (Out-String -InputObject $OldSacl)
+		}
+	}
+}
+Describe 'Get-IdentityReference' {
+	Context 'Function' {
+		BeforeAll {
+			$funcInfo = Get-Command -Name Get-IdentityReference
+			$self = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Translate([System.Security.Principal.NTAccount])
+			$default = Get-IdentityReference
+			$everyone = [System.Security.Principal.NTAccount]::new('Everyone')
+			$wellknown = Get-IdentityReference -WellKnownType ([System.Security.Principal.WellKnownSidType]::WorldSid)
+			$nt = Get-IdentityReference -NtName 'Everyone'
+			$idref = Get-IdentityReference -IdentityReference $everyone
+		}
+		It 'Returns values of type System.Security.Principal.IdentityReference' {
+			Should -ActualValue (($funcInfo.OutputType | % { $_.Name }) -contains 'System.Security.Principal.IdentityReference') `
+			       -Be `
+			       -ExpectedValue $true
+		}
+		@{WellKnownType=[System.Security.Principal.WellKnownSidType]
+		  DomainIdentifier=[System.Security.Principal.IdentityReference]
+		  NtName=[System.String]
+		  IdentityReference=[System.Security.Principal.IdentityReference]
+		}.GetEnumerator() | % {
+			$item = $_
+			It ('Accepts parameter {0}' -f $item.Key) {
+				Should -ActualValue $funcInfo.Parameters.($item.Key).ParameterType `
+				       -Be `
+				       -ExpectedValue $item.Value
+			}
+		}
+		It 'Gets current user by default' {
+			Should -ActualValue $default `
+			       -Be `
+			       -ExpectedValue $self
+		}
+		It 'Gets by well-known type' {
+			Should -ActualValue $wellknown `
+			       -Be `
+			       -ExpectedValue $everyone
+		}
+		It 'Gets by NT name' {
+			Should -ActualValue $nt `
+			       -Be `
+			       -ExpectedValue $everyone
+		}
+		It 'Gets by identity reference' {
+			Should -ActualValue $idref `
+			       -Be `
+			       -ExpectedValue $everyone
 		}
 	}
 }

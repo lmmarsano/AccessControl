@@ -22,8 +22,8 @@ New-Variable -Name NtAdministrators `
              -Description 'Builtin Administrators Group' `
              -Option ReadOnly `
              -Value ([System.Security.Principal.NTAccount]::new('BUILTIN', 'Administrators'))
-New-Variable -Name Everyone `
-             -Description 'Builtin Everyone Group' `
+New-Variable -Name AuthenticatedUsers `
+             -Description 'Authenticated Users Group' `
              -Option ReadOnly `
              -Value ([System.Security.Principal.NTAccount]::new('NT AUTHORITY', 'Authenticated Users'))
 <#
@@ -156,7 +156,7 @@ function Get-SecurityDescriptor {
 			{$_ -in 'ByPath','ByLiteralPath'} { Get-Item @PSBoundParameters }
 			Default {}
 		}) | % { $_.GetAccessControl($AccessControlSections) }
-    # PrivilegeNotHeldException
+    # TODO extend PrivilegeNotHeldException with error message recommending run as Administrator
 	} end {
 	}
 }
@@ -213,13 +213,11 @@ filter Get-RegistryKey {
 .EXAMPLE
 	$sd = [System.Security.AccessControl.RegistrySecurity]::new() `
 	| Edit-DACL -Modification Add `
-	            -Identity ([System.Security.Principal.NTAccount]::new('NT SERVICE','TrustedInstaller')) `
+	            -Trustee ([System.Security.Principal.NTAccount]::new('NT SERVICE','TrustedInstaller')) `
 	            -AccessMask ([System.Security.AccessControl.RegistryRights]::FullControl) `
 	| Edit-DACL -Modification Add `
-	            -Identity ([System.Security.Principal.NTAccount]::new('BUILTIN','Administrators')) `
+	            -Trustee ([System.Security.Principal.NTAccount]::new('BUILTIN','Administrators')) `
 	            -AccessMask ([System.Security.AccessControl.RegistryRights]::FullControl)
-.EXAMPLE
-	Another example of how to use this cmdlet
 #>
 function Edit-DACL {
 	[CmdletBinding()]
@@ -234,7 +232,7 @@ function Edit-DACL {
 		[System.Security.AccessControl.CommonObjectSecurity]
 		$InputObject,
 
-		# Modification Type of DACL change.
+		# Modification Type of DACL change. The documentation http://msdn.microsoft.com/en-us/library/system.security.accesscontrol.accesscontrolmodification.aspx explains each possibility.
 		[System.Security.AccessControl.AccessControlModification]
 		$Modification,
 
@@ -245,10 +243,10 @@ function Edit-DACL {
 		[System.Security.AccessControl.AccessRule]
 		$AccessRule,
 
-		# Identity Subject an access rule.
+		# Trustee Subject of an access rule.
 		[Parameter(ParameterSetName='RuleComponents')]
 		[System.Security.Principal.IdentityReference]
-		$Identity=[System.Security.Principal.WindowsIdentity]::GetCurrent().User,
+		$Trustee=[System.Security.Principal.WindowsIdentity]::GetCurrent().User,
 
 		# AccessMask Bitwise combination of enumeration values for rights drawn from the security descriptor's type. For the correct enumeration, lookup documentation for the accessMask parameter of your security descriptor's AccessRuleFactory method.
 		[Parameter( ParameterSetName='RuleComponents'
@@ -285,7 +283,7 @@ function Edit-DACL {
 			switch ($PSCmdlet.ParameterSetName) {
 				'RuleObject' {}
 				'RuleComponents' {
-					$AccessRule = $InputObject.AccessRuleFactory($Identity, $AccessMask, $IsInherited, $InheritanceFlags, $PropagationFlags, $Type)
+					$AccessRule = $InputObject.AccessRuleFactory($Trustee, $AccessMask, $IsInherited, $InheritanceFlags, $PropagationFlags, $Type)
 				}
 				Default { throw [System.ArgumentException]::new('ParameterSetName {0} does not exist' -f $PsCmdlet.ParameterSetName) }
 			}
@@ -310,10 +308,10 @@ function Edit-DACL {
 .EXAMPLE
 	$sd = [System.Security.AccessControl.RegistrySecurity]::new() `
 	| Edit-SACL -Modification Add `
-	            -Identity ([System.Security.Principal.NTAccount]::new('NT SERVICE','TrustedInstaller')) `
+	            -Trustee ([System.Security.Principal.NTAccount]::new('NT SERVICE','TrustedInstaller')) `
 	            -AccessMask ([System.Security.AccessControl.RegistryRights]::FullControl) `
 	| Edit-SACL -Modification Add `
-	            -Identity ([System.Security.Principal.NTAccount]::new('BUILTIN','Administrators')) `
+	            -Trustee ([System.Security.Principal.NTAccount]::new('BUILTIN','Administrators')) `
 	            -AccessMask ([System.Security.AccessControl.RegistryRights]::FullControl)
 .EXAMPLE
 	Another example of how to use this cmdlet
@@ -331,7 +329,7 @@ function Edit-SACL {
 		[System.Security.AccessControl.CommonObjectSecurity]
 		$InputObject,
 
-		# Modification Type of SACL change.
+		# Modification Type of SACL change. The documentation http://msdn.microsoft.com/en-us/library/system.security.accesscontrol.accesscontrolmodification.aspx explains each possibility.
 		[System.Security.AccessControl.AccessControlModification]
 		$Modification,
 
@@ -342,10 +340,10 @@ function Edit-SACL {
 		[System.Security.AccessControl.AuditRule]
 		$AuditRule,
 
-		# Identity Subject of an audit rule.
+		# Trustee Subject of an audit rule.
 		[Parameter(ParameterSetName='RuleComponents')]
 		[System.Security.Principal.IdentityReference]
-		$Identity=$Everyone,
+		$Trustee=$AuthenticatedUsers,
 
 		# AccessMask Bitwise combination of enumeration values for rights drawn from the security descriptor's type. For the correct enumeration, lookup documentation for the accessMask parameter of your security descriptor's AuditRuleFactory method.
 		[Parameter( ParameterSetName='RuleComponents'
@@ -382,7 +380,7 @@ function Edit-SACL {
 			switch ($PSCmdlet.ParameterSetName) {
 				'RuleObject' {}
 				'RuleComponents' {
-					$AuditRule = $InputObject.AuditRuleFactory($Identity, $AccessMask, $IsInherited, $InheritanceFlags, $PropagationFlags, $AuditFlags)
+					$AuditRule = $InputObject.AuditRuleFactory($Trustee, $AccessMask, $IsInherited, $InheritanceFlags, $PropagationFlags, $AuditFlags)
 				}
 				Default { throw [System.ArgumentException]::new('ParameterSetName {0} does not exist' -f $PsCmdlet.ParameterSetName) }
 			}
@@ -403,14 +401,13 @@ function Edit-SACL {
 .Synopsis
 	Edit security descriptor.
 .DESCRIPTION
-	Modifies owner, primary group, discretionary access control list, system access control list specified in a security descriptor.
+	Modifies owner, primary group, discretionary access control list, system access control list specified in a security descriptor. Windows has some issues mapping identity references to Security Identifiers: if errors emerge setting an access control list, try providing list subjects as [System.Security.Principal.SecurityIdentifier].
 .EXAMPLE
 	$sd = Edit-SecurityDescriptor -InputObject [System.Security.AccessControl.RegistrySecurity]::new() `
 	                              -Owner ([System.Security.Principal.NTAccount]::new('BUILTIN','Administrator')) `
 	                              -Group ([System.Security.Principal.NTAccount]::new('BUILTIN','Administrators'))
-.EXAMPLE
-	Another example of how to use this cmdlet
 #>
+# TODO handle exception from unmappable identity references (IdentityNotMappedException?)
 function Edit-SecurityDescriptor {
 	[CmdletBinding()]
 	[Alias()]
@@ -432,10 +429,10 @@ function Edit-SecurityDescriptor {
 		[System.Security.Principal.IdentityReference]
 		$Group,
 
-		# Dacl Discretionary ACL.
+		# Dacl Discretionary ACL. [System.Security.Principal.SecurityIdentifier] identity references are more robust against errors.
 		$Dacl,
 
-		# Sacl System ACL.
+		# Sacl System ACL. [System.Security.Principal.SecurityIdentifier] identity references are more robust against errors.
 		$Sacl
 	)
 	Begin {
@@ -481,5 +478,66 @@ function Edit-SecurityDescriptor {
 			}
 		}
 		$InputObject
+	}
+}
+
+<#
+.Synopsis
+	Get identity references to accounts.
+.DESCRIPTION
+	Gets Identity References by well-known type and (where applicable) domain identifier, fully-qualified NT Account name, or a provided identity reference (returned as NtAccount). By default, returns current user.
+.EXAMPLE
+	Get-IdentityReference
+.EXAMPLE
+	Get-IdentityReference -WellKnownType WorldSid
+.EXAMPLE
+	Get-IdentityReference -NtName Everyone
+.EXAMPLE
+	Get-IdentityReference -IdentityReference ([System.Security.Principal.NTAccount]::new('Everyone'))
+#>
+filter Get-IdentityReference {
+	[CmdletBinding()]
+	[Alias()]
+	[OutputType([System.Security.Principal.IdentityReference])]
+	Param(
+		# WellKnownType Well-known SID type.
+		[Parameter( ParameterSetName='WellKnown'
+		          , Mandatory=$true
+		          , ValueFromPipeline=$true
+		          , ValueFromPipelineByPropertyName=$true
+		          )]
+		[System.Security.Principal.WellKnownSidType]
+		$WellKnownType,
+
+		# DomainIdentifier Domain identity reference. Default: current user's domain.
+		[Parameter( ParameterSetName='WellKnown'
+		          , ValueFromPipelineByPropertyName=$true
+		          )]
+		[System.Security.Principal.IdentityReference]
+		$DomainIdentifier=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.AccountDomainSid,
+
+		# NtName Fully-qualified NT account name. If account belongs to a domain, domain\name. Some accounts, like Everyone, lack a domain, so the bare name suffices.
+		[Parameter( ParameterSetName='NtName'
+		          , Mandatory=$true
+		          , ValueFromPipeline=$true
+		          , ValueFromPipelineByPropertyName=$true
+		          )]
+		[System.String]
+		$NtName,
+
+		# IdentityReference An identity reference object. Defaults to current user.
+		[Parameter( ParameterSetName='ID'
+		          , ValueFromPipeline=$true
+		          , ValueFromPipelineByPropertyName=$true
+		          )]
+		[System.Security.Principal.IdentityReference]
+		$IdentityReference=[System.Security.Principal.WindowsIdentity]::GetCurrent().User
+	)
+
+	switch ($PsCmdlet.ParameterSetName) {
+		'WellKnown' { [System.Security.Principal.SecurityIdentifier]::new($WellKnownType,$DomainIdentifier).Translate([System.Security.Principal.NTAccount]) }
+		'NtName' { [System.Security.Principal.NTAccount]::new($NtName) }
+		'ID' { $IdentityReference.Translate([System.Security.Principal.NTAccount]) }
+		Default { throw [System.ArgumentException]::new('ParameterSetName {0} does not exist' -f $PsCmdlet.ParameterSetName) }
 	}
 }
